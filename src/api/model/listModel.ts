@@ -94,3 +94,35 @@ export interface UpNumList {
   total_upload_count: number;
   this_month_upload_count: number;
 }
+
+// 目录相关接口定义
+export interface CataModel {
+  id?: number;
+  name: string;
+  code: string;
+  isdisabled: number;
+  last_updater: string;
+  last_time: Date;
+}
+
+export interface CataResult {
+  list: Array<CataModel>;
+}
+
+export interface AddCataRequest {
+  name: string;
+  code: string;
+  last_updater: string;
+}
+
+export interface ModCataRequest {
+  id: number;
+  name: string;
+  code: string;
+  last_updater: string;
+}
+
+export interface ChangeCataStateRequest {
+  code: number;
+  isdisabled: number;
+}

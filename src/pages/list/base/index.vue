@@ -3,16 +3,13 @@
     <t-card class="list-card-container" :bordered="false">
       <t-row justify="space-between">
         <div class="left-operation-container">
-          <t-button @click="handleSetupContract"> {{ $t('pages.listBase.create') }} </t-button>
-          <!-- <t-button variant="base" theme="default" :disabled="!selectedRowKeys.length">
-            {{ $t('pages.listBase.export') }}</t-button
-          > -->
+          <t-button @click="handleAddCata">新建目录</t-button>
           <p v-if="!!selectedRowKeys.length" class="selected-count">
-            {{ $t('pages.listBase.select') }} {{ selectedRowKeys.length }} {{ $t('pages.listBase.items') }}
+            已选 {{ selectedRowKeys.length }} 项
           </p>
         </div>
         <div class="search-input">
-          <t-input v-model="searchValue" :placeholder="$t('pages.listBase.placeholder')" clearable>
+          <t-input v-model="searchValue" placeholder="搜索目录名称、编号或操作人" clearable @input="watchSearchValue">
             <template #suffix-icon>
               <search-icon size="16px" />
             </template>
@@ -20,7 +17,7 @@
         </div>
       </t-row>
       <t-table
-        :data="data"
+        :data="filteredData"
         :columns="COLUMNS"
         :row-key="rowKey"
         vertical-align="top"
@@ -33,43 +30,24 @@
         @change="rehandleChange"
         @select-change="(value: number[]) => rehandleSelectChange(value)"
       >
-        <template #status="{ row }">
-          <t-tag v-if="row.status === CONTRACT_STATUS.FAIL" theme="danger" variant="light">
-            {{ $t('pages.listBase.contractStatusEnum.fail') }}</t-tag
-          >
-          <t-tag v-if="row.status === CONTRACT_STATUS.AUDIT_PENDING" theme="warning" variant="light">
-            {{ $t('pages.listBase.contractStatusEnum.audit') }}
+        <template #isdisabled="{ row }">
+          <t-tag v-if="row.isdisabled === 4" theme="success" variant="light">
+            启用
           </t-tag>
-          <t-tag v-if="row.status === CONTRACT_STATUS.EXEC_PENDING" theme="warning" variant="light">
-            {{ $t('pages.listBase.contractStatusEnum.pending') }}
-          </t-tag>
-          <t-tag v-if="row.status === CONTRACT_STATUS.EXECUTING" theme="success" variant="light">
-            {{ $t('pages.listBase.contractStatusEnum.executing') }}
-          </t-tag>
-          <t-tag v-if="row.status === CONTRACT_STATUS.FINISH" theme="success" variant="light">
-            {{ $t('pages.listBase.contractStatusEnum.finish') }}
+          <t-tag v-else theme="danger" variant="light">
+            禁用
           </t-tag>
         </template>
-        <template #contractType="{ row }">
-          <p v-if="row.contractType === CONTRACT_TYPES.MAIN">{{ $t('pages.listBase.contractStatusEnum.fail') }}</p>
-          <p v-if="row.contractType === CONTRACT_TYPES.SUB">{{ $t('pages.listBase.contractStatusEnum.audit') }}</p>
-          <p v-if="row.contractType === CONTRACT_TYPES.SUPPLEMENT">
-            {{ $t('pages.listBase.contractStatusEnum.pending') }}
-          </p>
-        </template>
-        <template #paymentType="{ row }">
-          <div v-if="row.paymentType === CONTRACT_PAYMENT_TYPES.PAYMENT" class="payment-col">
-            {{ $t('pages.listBase.pay') }}<trend class="dashboard-item-trend" type="up" />
-          </div>
-          <div v-if="row.paymentType === CONTRACT_PAYMENT_TYPES.RECEIPT" class="payment-col">
-            {{ $t('pages.listBase.receive') }}<trend class="dashboard-item-trend" type="down" />
-          </div>
+        <template #last_time="{ row }">
+          {{ new Date(row.last_time).toLocaleString() }}
         </template>
 
         <template #op="slotProps">
           <t-space>
-            <t-link theme="primary" @click="handleClickDetail()"> {{ $t('pages.listBase.detail') }}</t-link>
-            <t-link theme="danger" @click="handleClickDelete(slotProps)"> {{ $t('pages.listBase.delete') }}</t-link>
+            <!-- <t-link theme="primary" @click="handleEditCata(slotProps)">编辑</t-link> -->
+            <t-link :theme="slotProps.row.isdisabled === 4 ? 'warning' : 'success'"  @click="handleChangeState(slotProps)">
+              {{ slotProps.row.isdisabled === 4 ? '禁用' : '启用' }}
+            </t-link>
           </t-space>
         </template>
       </t-table>
@@ -77,11 +55,28 @@
 
     <t-dialog
       v-model:visible="confirmVisible"
-      header="确认删除当前所选目录？"
+      header="确认变更状态"
       :body="confirmBody"
       :on-cancel="onCancel"
       @confirm="onConfirmDelete"
     />
+
+    <!-- 新建/编辑目录弹窗 -->
+    <t-dialog
+      v-model:visible="cataDialogVisible"
+      :header="isEditMode ? '编辑目录' : '新建目录'"
+      width="500px"
+      @confirm="handleSaveCata"
+    >
+      <t-form :data="currentCataData" label-width="100px">
+        <t-form-item label="目录名称" name="name">
+          <t-input v-model="currentCataData.name" placeholder="请输入目录名称" />
+        </t-form-item>
+        <t-form-item label="目录编号" name="code">
+          <t-input v-model="currentCataData.code" placeholder="请输入目录编号" />
+        </t-form-item>
+      </t-form>
+    </t-dialog>
   </div>
 </template>
 
@@ -97,7 +92,8 @@ import { MessagePlugin, PrimaryTableCol, TableRowData } from 'tdesign-vue-next';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { getList } from '@/api/list';
+import { addCata, changeCataState, getCataManageList, modCata } from '@/api/list';
+import type { AddCataRequest, CataModel, ModCataRequest } from '@/api/model/listModel';
 import Trend from '@/components/trend/index.vue';
 import { prefix } from '@/config/global';
 import { CONTRACT_PAYMENT_TYPES, CONTRACT_STATUS, CONTRACT_TYPES } from '@/constants';
@@ -109,47 +105,46 @@ const store = useSettingStore();
 const COLUMNS: PrimaryTableCol<TableRowData>[] = [
   { colKey: 'row-select', type: 'multiple', width: 64, fixed: 'left' },
   {
-    title: t('pages.listBase.contractName'),
+    title: '目录名称',
     align: 'left',
-    width: 320,
+    width: 200,
     colKey: 'name',
     fixed: 'left',
   },
-  { title: t('pages.listBase.contractStatus'), colKey: 'status', width: 160 },
   {
-    title: t('pages.listBase.contractNum'),
+    title: '目录编号',
     width: 160,
     ellipsis: true,
-    colKey: 'no',
+    colKey: 'code',
   },
   {
-    title: t('pages.listBase.contractType'),
+    title: '状态',
+    width: 120,
+    colKey: 'isdisabled',
+  },
+  {
+    title: '最后操作人',
     width: 160,
     ellipsis: true,
-    colKey: 'adminName',
+    colKey: 'last_updater',
   },
-  // {
-  //   title: t('pages.listBase.contractPayType'),
-  //   width: 160,
-  //   ellipsis: true,
-  //   colKey: 'paymentType',
-  // },
-  // {
-  //   title: t('pages.listBase.contractAmount'),
-  //   width: 160,
-  //   ellipsis: true,
-  //   colKey: 'amount',
-  // },
   {
-    title: t('pages.listBase.operation'),
+    title: '最后更新时间',
+    width: 180,
+    ellipsis: true,
+    colKey: 'last_time',
+  },
+  {
+    title: '操作',
     align: 'left',
     fixed: 'right',
-    width: 160,
+    width: 200,
     colKey: 'op',
   },
 ];
 
-const data = ref([]);
+const data = ref<CataModel[]>([]);
+const filteredData = ref<CataModel[]>([]);
 const pagination = ref({
   defaultPageSize: 20,
   total: 100,
@@ -162,8 +157,9 @@ const dataLoading = ref(false);
 const fetchData = async () => {
   dataLoading.value = true;
   try {
-    const { list } = await getList();
+    const { list } = await getCataManageList();
     data.value = list;
+    filteredData.value = list;
     pagination.value = {
       ...pagination.value,
       total: list.length,
@@ -175,14 +171,56 @@ const fetchData = async () => {
   }
 };
 
+// 搜索过滤
+const handleSearch = () => {
+  if (!searchValue.value.trim()) {
+    filteredData.value = data.value;
+  } else {
+    const keyword = searchValue.value.toLowerCase();
+    filteredData.value = data.value.filter(item => 
+      item.name.toLowerCase().includes(keyword) ||
+      item.code.toLowerCase().includes(keyword) ||
+      item.last_updater.toLowerCase().includes(keyword)
+    );
+  }
+  pagination.value.total = filteredData.value.length;
+};
+
+// 监听搜索值变化
+const watchSearchValue = () => {
+  handleSearch();
+};
+
 const deleteIdx = ref(-1);
 const confirmBody = computed(() => {
   if (deleteIdx.value > -1) {
-    const { name } = data.value[deleteIdx.value];
-    return `删除后，${name}的所有目录和文档信息将被清空，且无法恢复`;
+    const { name } = filteredData.value[deleteIdx.value];
+    return `确认要变更${name}的状态吗？`;
   }
   return '';
 });
+
+// 新建/编辑目录相关
+const cataDialogVisible = ref(false);
+const isEditMode = ref(false);
+const currentCataData = ref<CataModel>({
+  name: '',
+  code: '',
+  isdisabled: 0,
+  last_updater: '',
+  last_time: new Date(),
+});
+
+// 重置目录表单
+const resetCataForm = () => {
+  currentCataData.value = {
+    name: '',
+    code: '',
+    isdisabled: 0,
+    last_updater: '',
+    last_time: new Date(),
+  };
+};
 
 onMounted(() => {
   fetchData();
@@ -190,7 +228,7 @@ onMounted(() => {
 
 const confirmVisible = ref(false);
 
-const selectedRowKeys = ref([1, 2]);
+const selectedRowKeys = ref<number[]>([]);
 
 const router = useRouter();
 
@@ -198,16 +236,21 @@ const resetIdx = () => {
   deleteIdx.value = -1;
 };
 
-const onConfirmDelete = () => {
-  // 真实业务请发起请求
-  data.value.splice(deleteIdx.value, 1);
-  pagination.value.total = data.value.length;
-  const selectedIdx = selectedRowKeys.value.indexOf(deleteIdx.value);
-  if (selectedIdx > -1) {
-    selectedRowKeys.value.splice(selectedIdx, 1);
+const onConfirmDelete = async () => {
+  try {
+    const item = filteredData.value[deleteIdx.value];
+    if (item.id) {
+      await changeCataState({
+        code: item.id,
+        isdisabled: item.isdisabled === 0 ? 1 : 0,
+      });
+      MessagePlugin.success('状态变更成功');
+      fetchData();
+    }
+  } catch (e) {
+    MessagePlugin.error('状态变更失败');
   }
   confirmVisible.value = false;
-  MessagePlugin.success('删除成功');
   resetIdx();
 };
 
@@ -215,7 +258,7 @@ const onCancel = () => {
   resetIdx();
 };
 
-const rowKey = 'index';
+const rowKey = 'id';
 
 const rehandleSelectChange = (val: number[]) => {
   selectedRowKeys.value = val;
@@ -226,15 +269,68 @@ const rehandlePageChange = (curr: unknown, pageInfo: unknown) => {
 const rehandleChange = (changeParams: unknown, triggerAndData: unknown) => {
   console.log('统一Change', changeParams, triggerAndData);
 };
-const handleClickDetail = () => {
-  router.push('/detail/base');
+// 新建目录
+const handleAddCata = () => {
+  isEditMode.value = false;
+  resetCataForm();
+  cataDialogVisible.value = true;
 };
+
+// 编辑目录
+const handleEditCata = (row: { row: CataModel; rowIndex: number }) => {
+  isEditMode.value = true;
+  currentCataData.value = { ...row.row };
+  cataDialogVisible.value = true;
+};
+
+// 变更状态
+const handleChangeState = async (row: any) => {
+  try {
+    console.log('handleChangeState: ',row.row.code)
+    if (row.row.code) {
+      const newState = row.isdisabled === 4 ? 0 : 4; // 切换状态
+      await changeCataState({
+        code: row.row.code,
+        isdisabled: newState,
+      });
+      MessagePlugin.success('状态变更成功');
+      fetchData(); // 刷新数据
+    }
+  } catch (e) {
+    MessagePlugin.error('状态变更失败');
+  }
+};
+
+// 保存目录
+const handleSaveCata = async () => {
+  try {
+    if (isEditMode.value) {
+      if (currentCataData.value.id) {
+        await modCata({
+          id: currentCataData.value.id,
+          name: currentCataData.value.name,
+          code: currentCataData.value.code,
+          last_updater: currentCataData.value.last_updater,
+        });
+        MessagePlugin.success('修改成功');
+      }
+    } else {
+      await addCata({
+        name: currentCataData.value.name,
+        code: currentCataData.value.code,
+        last_updater: currentCataData.value.last_updater,
+      });
+      MessagePlugin.success('新建成功');
+    }
+    cataDialogVisible.value = false;
+    fetchData();
+  } catch (e) {
+    MessagePlugin.error(isEditMode.value ? '修改失败' : '新建失败');
+  }
+};
+
 const handleSetupContract = () => {
-  router.push('/form/base');
-};
-const handleClickDelete = (row: { rowIndex: any }) => {
-  deleteIdx.value = row.rowIndex;
-  confirmVisible.value = true;
+  handleAddCata();
 };
 
 const headerAffixedTop = computed(

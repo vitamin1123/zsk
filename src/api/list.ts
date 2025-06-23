@@ -1,6 +1,6 @@
 import { number } from 'echarts';
 
-import type { CardListResult, CataListResult, ListResult, OrgListResult, ResResult, RUpListResult, UserListResult } from '@/api/model/listModel';
+import type { AddCataRequest, CardListResult, CataListResult, CataModel, CataResult, ChangeCataStateRequest, ListResult, ModCataRequest, OrgListResult, ResResult, RUpListResult, UserListResult } from '@/api/model/listModel';
 import { request } from '@/utils/request';
 
 const Api = {
@@ -13,6 +13,9 @@ const Api = {
   SearchUserList: `/search-user-list?t_${new Date().getTime()}`,
   ShareList: `/get-share-list?t_${new Date().getTime()}`,
   MyUp: `/get-my-up?t_${new Date().getTime()}`,
+  AddCata: '/add_cata',
+  ModCata: '/mod_cata',
+  ChangeCataState: '/change_cata_state',
 };
 
 export function getList() {
@@ -112,3 +115,36 @@ export function getCataList() {
     url: Api.CataList,
   });
 }
+
+// 获取目录列表（用于目录管理页面）
+export function getCataManageList() {
+  return request.get<CataResult>({
+    url: Api.BaseList,
+  });
+}
+
+// 新增目录
+export function addCata(data: AddCataRequest) {
+  return request.post<ResResult>({
+    url: Api.AddCata,
+    data,
+  });
+}
+
+// 修改目录
+export function modCata(data: ModCataRequest) {
+  return request.post<ResResult>({
+    url: Api.ModCata,
+    data,
+  });
+}
+
+// 变更目录状态
+export function changeCataState(data: ChangeCataStateRequest) {
+  return request.post<ResResult>({
+    url: Api.ChangeCataState,
+    data,
+  });
+}
+
+
